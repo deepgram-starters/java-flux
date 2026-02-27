@@ -31,12 +31,12 @@ import io.javalin.http.Context;
 import io.javalin.websocket.WsConfig;
 import io.javalin.websocket.WsContext;
 
-import org.eclipse.jetty.websocket.api.Callback;
 import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.api.StatusCode;
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketClose;
+import org.eclipse.jetty.websocket.api.annotations.OnWebSocketConnect;
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketError;
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketMessage;
-import org.eclipse.jetty.websocket.api.annotations.OnWebSocketOpen;
 import org.eclipse.jetty.websocket.api.annotations.WebSocket;
 import org.eclipse.jetty.websocket.client.ClientUpgradeRequest;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
@@ -407,11 +407,15 @@ public class App {
         });
 
         // Forward client binary messages to Deepgram
-        ws.onBinaryMessage((ctx, data, offset, length) -> {
+        ws.onBinaryMessage(ctx -> {
             DeepgramSocket dgSocket = ctx.attribute("deepgramSocket");
             if (dgSocket != null && dgSocket.isOpen()) {
-                ByteBuffer buffer = ByteBuffer.wrap(data, offset, length);
-                dgSocket.sendBinary(buffer);
+                byte[] data = ctx.data();
+                int offset = ctx.offset();
+                int length = ctx.length();
+                byte[] bytes = new byte[length];
+                System.arraycopy(data, offset, bytes, 0, length);
+                dgSocket.sendBinary(ByteBuffer.wrap(bytes));
             }
         });
 
@@ -463,7 +467,7 @@ public class App {
             this.clientCtx = clientCtx;
         }
 
-        @OnWebSocketOpen
+        @OnWebSocketConnect
         public void onOpen(Session session) {
             this.deepgramSession = session;
             System.out.println("Connected to Deepgram Flux API");
@@ -492,22 +496,20 @@ public class App {
          * Forwards binary messages from Deepgram to the client.
          */
         @OnWebSocketMessage
-        public void onBinaryMessage(Session session, ByteBuffer payload, Callback callback) {
+        public void onBinaryMessage(byte[] payload, int offset, int len) {
             deepgramMessageCount++;
             if (deepgramMessageCount % 10 == 0) {
                 System.out.println("<- Deepgram binary message #" + deepgramMessageCount
-                        + " (size: " + payload.remaining() + ")");
+                        + " (size: " + len + ")");
             }
             try {
                 if (clientCtx.session.isOpen()) {
-                    byte[] data = new byte[payload.remaining()];
-                    payload.get(data);
+                    byte[] data = new byte[len];
+                    System.arraycopy(payload, offset, data, 0, len);
                     clientCtx.send(ByteBuffer.wrap(data));
                 }
-                callback.succeed();
             } catch (Exception e) {
                 System.err.println("Error forwarding Deepgram binary to client: " + e.getMessage());
-                callback.fail(e);
             }
         }
 
@@ -549,7 +551,11 @@ public class App {
                         + " (size: " + text.length() + ")");
             }
             if (isOpen()) {
-                deepgramSession.sendText(text, Callback.NOOP);
+                try {
+                    deepgramSession.getRemote().sendString(text);
+                } catch (Exception e) {
+                    System.err.println("Error sending text to Deepgram: " + e.getMessage());
+                }
             }
         }
 
@@ -561,14 +567,18 @@ public class App {
                         + " (size: " + data.remaining() + ")");
             }
             if (isOpen()) {
-                deepgramSession.sendBinary(data, Callback.NOOP);
+                try {
+                    deepgramSession.getRemote().sendBytes(data);
+                } catch (Exception e) {
+                    System.err.println("Error sending binary to Deepgram: " + e.getMessage());
+                }
             }
         }
 
         /** Close the Deepgram connection */
         public void close(int code, String reason) {
             if (isOpen()) {
-                deepgramSession.close(code, reason, Callback.NOOP);
+                deepgramSession.close(code, reason);
             }
         }
     }
