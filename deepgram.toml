@@ -6,7 +6,7 @@ repository = "https://github.com/deepgram-starters/java-flux"
 useCase = "flux"
 language = "Java"
 framework = "Javalin"
-sdk = "N/A"
+sdk = "deepgram-java-sdk"
 tags = ["flux", "turn-detection", "real-time-transcription", "streaming-stt", "end-of-turn", "java", "javalin"]
 
 [check]
